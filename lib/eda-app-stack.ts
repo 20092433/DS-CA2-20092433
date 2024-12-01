@@ -8,6 +8,7 @@ import * as sqs from "aws-cdk-lib/aws-sqs";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as subs from "aws-cdk-lib/aws-sns-subscriptions";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
 import { Construct } from "constructs";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -16,27 +17,63 @@ export class EDAAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+
+    // s3 bucket 
     const imagesBucket = new s3.Bucket(this, "images", {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       publicReadAccess: false,
     });
 
+
+
      // Integration infrastructure
 
-  const imageProcessQueue = new sqs.Queue(this, "img-created-queue", {
-    receiveMessageWaitTime: cdk.Duration.seconds(5),
-  });
-
-
-  const mailerQ = new sqs.Queue(this, "mailer-queue", {
-    receiveMessageWaitTime: cdk.Duration.seconds(10),
-  });
-
-
+     // sns topic
   const newImageTopic = new sns.Topic(this, "NewImageTopic", {
     displayName: "New Image topic",
   }); 
+
+  //    sqs queues
+  // const imageProcessQueue = new sqs.Queue(this, "img-created-queue", {
+  //   receiveMessageWaitTime: cdk.Duration.seconds(5),
+  // });
+
+
+  
+
+ //    sqs queues
+
+   // Dead Letter Queue (DLQ)
+   const deadLetterQueue = new sqs.Queue(this, 'DLQ', {
+    retentionPeriod: cdk.Duration.days(14),
+  });
+
+
+  // Main Image Process Queue with DLQ configured
+const imageProcessQueue = new sqs.Queue(this, 'ImageProcessQueue', {
+  receiveMessageWaitTime: cdk.Duration.seconds(5),
+  deadLetterQueue: {
+    maxReceiveCount: 3, // Move to DLQ after 3 failed attempts
+    queue: deadLetterQueue,
+  },
+});
+
+// Mailer queue
+
+const mailerQ = new sqs.Queue(this, "mailer-queue", {
+  receiveMessageWaitTime: cdk.Duration.seconds(10),
+});
+
+
+
+  //dynamodb table
+  const logImageTable = new dynamodb.Table(this, 'LogImageTable', {
+    partitionKey: { name: 'fileName', type: dynamodb.AttributeType.STRING },
+    removalPolicy: cdk.RemovalPolicy.DESTROY, // Use RETAIN for production
+  });
+  
+
 
 
 
@@ -61,6 +98,19 @@ export class EDAAppStack extends cdk.Stack {
   });
 
 
+  // rejection mailer lambda
+  const rejectionMailerFn = new lambdanode.NodejsFunction(this, 'RejectionMailer', {
+    runtime: lambda.Runtime.NODEJS_18_X,
+    entry: `${__dirname}/../lambdas/rejectionMailer.ts`,
+    environment: {
+      SES_EMAIL_TO: process.env.SES_EMAIL_TO!,
+      SES_EMAIL_FROM: process.env.SES_EMAIL_FROM!,
+      SES_REGION: process.env.SES_REGION!,
+    },
+  });
+  
+
+
  
 
   // S3 --> SQS
@@ -70,8 +120,14 @@ export class EDAAppStack extends cdk.Stack {
   );
 
 
+  // SNS subscriptions
   newImageTopic.addSubscription(
     new subs.SqsSubscription(mailerQ)
+  );
+
+  // add lambda as subscriber
+  newImageTopic.addSubscription(
+    new subs.LambdaSubscription(mailerFn)
   );
 
   
@@ -109,6 +165,20 @@ export class EDAAppStack extends cdk.Stack {
       resources: ["*"],
     })
   );
+
+  // Grant permissions for SES
+rejectionMailerFn.addToRolePolicy(new iam.PolicyStatement({
+  actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+  resources: ['*'],
+}));
+
+// Grant DLQ permissions
+deadLetterQueue.grantConsumeMessages(rejectionMailerFn);
+
+// allow lambda for image processing write to table
+logImageTable.grantWriteData(processImageFn);
+
+
 
   // Output
   
