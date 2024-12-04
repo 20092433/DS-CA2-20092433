@@ -42,9 +42,9 @@ export const handler: SQSHandler = async (event) => {
           throw new Error(`Unsupported file type: ${fileExtension}`);
         }
 
-        // Add file metadata to DynamoDB
+        // Add coorect file type to DynamoDB
         try {
-          const tableName = process.env.DYNAMODB_TABLE_NAME; // Ensure this is set
+          const tableName = process.env.DYNAMODB_TABLE_NAME; // E
           const putItemCommand = new PutItemCommand({
             TableName: tableName,
             Item: {

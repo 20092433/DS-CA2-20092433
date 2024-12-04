@@ -60,6 +60,13 @@ export class EDAAppStack extends cdk.Stack {
       newImageTopic.addSubscription(new subs.SqsSubscription(imageProcessQueue));
       newImageTopic.addSubscription(new subs.SqsSubscription(rejectionQueue));
 
+       // DynamoDB Table
+      const imageTable = new dynamodb.Table(this, 'ImageTable', {
+      partitionKey: { name: 'fileName', type: dynamodb.AttributeType.STRING },
+      tableName: 'ImageTable', // Explicitly set the table name
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // Optional: Deletes table when stack is deleted
+      });
+
   // Update Lambda Function for Processing Images
       const processImageFn = new lambdanode.NodejsFunction(this, 'ProcessImageFn', {
       runtime: lambda.Runtime.NODEJS_18_X,
@@ -69,6 +76,7 @@ export class EDAAppStack extends cdk.Stack {
       memorySize: 128,
       environment: {
       BUCKET_NAME: imagesBucket.bucketName,
+      DYNAMODB_TABLE_NAME: imageTable.tableName, 
       REJECTION_QUEUE_URL: rejectionQueue.queueUrl,
   },
 });
@@ -88,7 +96,7 @@ export class EDAAppStack extends cdk.Stack {
     resources: ['*'], // Replace with a specific SES resource if necessary
     }));
 
-    
+
 
       // Add SQS Event Sources to Lambdas
       const sqsEventSource = new events.SqsEventSource(imageProcessQueue, {
@@ -105,6 +113,7 @@ export class EDAAppStack extends cdk.Stack {
 
       // Grant Permissions
       imagesBucket.grantReadWrite(processImageFn);
+      imageTable.grantWriteData(processImageFn); // Grant write permissions to the table
       rejectionQueue.grantSendMessages(processImageFn);
       rejectionQueue.grantConsumeMessages(rejectionMailerFn);
   }
