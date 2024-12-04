@@ -82,6 +82,14 @@ export class EDAAppStack extends cdk.Stack {
      memorySize: 128,
 });
 
+      // Grant SES permissions to send emails
+    rejectionMailerFn.addToRolePolicy(new iam.PolicyStatement({
+    actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+    resources: ['*'], // Replace with a specific SES resource if necessary
+    }));
+
+    
+
       // Add SQS Event Sources to Lambdas
       const sqsEventSource = new events.SqsEventSource(imageProcessQueue, {
           batchSize: 5,

@@ -7,6 +7,10 @@ import {
   S3Client,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+const dynamoDb = new DynamoDBClient({ region: process.env.AWS_REGION });
+
+
 
 const s3 = new S3Client();
 
@@ -36,6 +40,23 @@ export const handler: SQSHandler = async (event) => {
             )}`
           );
           throw new Error(`Unsupported file type: ${fileExtension}`);
+        }
+
+        // Add file metadata to DynamoDB
+        try {
+          const tableName = process.env.DYNAMODB_TABLE_NAME; // Ensure this is set
+          const putItemCommand = new PutItemCommand({
+            TableName: tableName,
+            Item: {
+              fileName: { S: srcKey },
+            },
+          });
+          await dynamoDb.send(putItemCommand);
+          console.log(`File metadata stored in DynamoDB: ${srcKey}`);
+        } catch (error) {
+          console.error(
+            `Failed to store file metadata in DynamoDB: ${error}`
+          );
         }
 
 

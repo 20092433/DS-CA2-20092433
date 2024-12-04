@@ -1,17 +1,51 @@
 import { SQSHandler } from 'aws-lambda';
+import { SESClient, SendEmailCommand, SendEmailCommandInput } from '@aws-sdk/client-ses';
+import { SES_EMAIL_FROM, SES_EMAIL_TO, SES_REGION } from '../env';
+
+if (!SES_EMAIL_TO || !SES_EMAIL_FROM || !SES_REGION) {
+  throw new Error(
+    'Please add the SES_EMAIL_TO, SES_EMAIL_FROM, and SES_REGION environment variables in an env.js file located in the root directory'
+  );
+}
+
+type RejectionDetails = {
+  reason: string;
+  file: string;
+};
+
+const client = new SESClient({ region: SES_REGION });
 
 export const handler: SQSHandler = async (event) => {
   console.log('Rejection Messages Received: ', JSON.stringify(event));
 
   for (const record of event.Records) {
     try {
-      const rejectionMessage = JSON.parse(record.body);
-      console.log('Processing Rejection: ', rejectionMessage);
+      const rejectionMessage: RejectionDetails = JSON.parse(record.body);
 
-      // Add email logic here or log the rejection
-      console.log(
-        `Rejection reason: ${rejectionMessage.reason}, file: ${rejectionMessage.key}`
-      );
+      const reason = rejectionMessage.reason || 'Unknown reason';
+      const file = rejectionMessage.file || 'Unknown file';
+
+      console.log(`Processing Rejection: Reason - ${reason}, File - ${file}`);
+
+      const params: SendEmailCommandInput = {
+        Source: SES_EMAIL_FROM,
+        Destination: {
+          ToAddresses: [SES_EMAIL_TO],
+        },
+        Message: {
+          Subject: {
+            Data: 'File Upload Rejected',
+          },
+          Body: {
+            Text: {
+              Data: `The file "${file}" was rejected. Reason: ${reason}.`,
+            },
+          },
+        },
+      };
+
+      await client.send(new SendEmailCommand(params));
+      console.log(`Email sent to ${SES_EMAIL_TO} about rejection of file: ${file}`);
     } catch (error) {
       console.error('Error processing rejection message:', error);
     }
