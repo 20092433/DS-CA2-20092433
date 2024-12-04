@@ -1,7 +1,5 @@
 /* eslint-disable import/extensions, import/no-absolute-path */
 import { SQSHandler } from "aws-lambda";
-import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
-
 import {
   GetObjectCommand,
   PutObjectCommandInput,
@@ -11,8 +9,6 @@ import {
 } from "@aws-sdk/client-s3";
 
 const s3 = new S3Client();
-const dynamoDB = new DynamoDBClient({ region: 'eu-west-1' });
-
 
 export const handler: SQSHandler = async (event) => {
   console.log("Event ", JSON.stringify(event));
@@ -29,24 +25,27 @@ export const handler: SQSHandler = async (event) => {
         const srcKey = decodeURIComponent(s3e.object.key.replace(/\+/g, " "));
 
 
-        // validate file types
-        if (!srcKey.toLowerCase().endsWith('.jpeg') && !srcKey.toLowerCase().endsWith('.png')) {
-          console.error(`Invalid file type: ${srcKey}`);
-          throw new Error(`Invalid file type: ${srcKey}`);
+        // Validate file type
+        const allowedExtensions = [".jpeg", ".png"];
+        const fileExtension = srcKey.slice(srcKey.lastIndexOf(".")).toLowerCase();
+
+        if (!allowedExtensions.includes(fileExtension)) {
+          console.error(
+            `Invalid file type: ${fileExtension}. Supported types are ${allowedExtensions.join(
+              ", "
+            )}`
+          );
+          throw new Error(`Unsupported file type: ${fileExtension}`);
         }
 
-        // **Step 2: Log valid image to DynamoDB**
-      const logParams = {
-        TableName: process.env.DYNAMODB_TABLE_NAME!,
-        Item: {
-          fileName: { S: srcKey },
-        },
-      };
-      await dynamoDB.send(new PutItemCommand(logParams));
-      console.log(`Logged file to DynamoDB: ${srcKey}`);
 
 
-       
+
+
+
+
+
+
         let origimage = null;
         try {
           // Download the image from the S3 source bucket.
@@ -58,7 +57,6 @@ export const handler: SQSHandler = async (event) => {
           // Process the image ......
         } catch (error) {
           console.log(error);
-          throw error; // to the dead queue
         }
       }
     }

@@ -28,6 +28,8 @@
       "/opt/nodejs/sharp-utils": ["layers/sharp-utils/nodejs/sharp-utils"],
       "/opt/*": ["shared/*"]
     },
+    "resolveJsonModule": true,
+    "esModuleInterop": true
   },
   "exclude": [
     "node_modules",
