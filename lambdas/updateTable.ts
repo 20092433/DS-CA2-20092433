@@ -12,7 +12,7 @@ export const handler = async (event: SNSEvent) => {
 
         // Extract values from SNS message
         const metadataType = record.Sns.MessageAttributes.metadata_type?.Value;
-        const fileName = snsMessage.id; // Match partition key 'fileName'
+        const fileName = snsMessage.id; // Match partition key that is 'fileName'
         const metadataValue = snsMessage.value;
 
         // DynamoDB Update Parameters
@@ -28,7 +28,7 @@ export const handler = async (event: SNSEvent) => {
             },
         };
 
-        // Perform the update operation
+        // Update the dynamodb table
         try {
             await dynamoDb.send(new UpdateItemCommand(params));
             console.log(`Successfully updated item: ${fileName}`);

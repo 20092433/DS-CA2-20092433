@@ -25,7 +25,7 @@ export class EDAAppStack extends cdk.Stack {
       });
 
       // Create the Dead Letter Queue
-const processImageDLQ = new sqs.Queue(this, 'process-image-dlq', {
+const logImageDLQ = new sqs.Queue(this, 'process-image-dlq', {
     retentionPeriod: cdk.Duration.days(14), // Retain messages for 14 days
 });
 
@@ -33,7 +33,7 @@ const processImageDLQ = new sqs.Queue(this, 'process-image-dlq', {
 const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
     receiveMessageWaitTime: cdk.Duration.seconds(19),
     deadLetterQueue: {
-        queue: processImageDLQ, // Reference the Dead Letter Queue
+        queue: logImageDLQ, // Reference the Dead Letter Queue
         maxReceiveCount: 5,    // Maximum number of retries before moving to DLQ
     },
 });
@@ -45,11 +45,18 @@ const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
           displayName: 'New Image topic',
       });
 
-      // Add Bucket Notification to SNS
+      // Add Bucket Notification to SNS topic
       imagesBucket.addEventNotification(
           s3.EventType.OBJECT_CREATED,
           new s3n.SnsDestination(newImageTopic)
       );
+
+      // delete triggers SNS topic
+      imagesBucket.addEventNotification(
+        s3.EventType.OBJECT_REMOVED,
+        new s3n.SnsDestination(newImageTopic)
+      );
+      
 
       
       
@@ -78,16 +85,16 @@ const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
 
 
   // Update Lambda Function for Processing Images
-      const processImageFn = new lambdanode.NodejsFunction(this, 'ProcessImageFn', {
+      const logImageFn = new lambdanode.NodejsFunction(this, 'logImageFn', {
       runtime: lambda.Runtime.NODEJS_18_X,
-      entry: `${__dirname}/../lambdas/processImage.ts`,
+      entry: `${__dirname}/../lambdas/logImage.ts`,
       handler: 'handler',
       timeout: cdk.Duration.seconds(15),
       memorySize: 128,
       environment: {
       BUCKET_NAME: imagesBucket.bucketName,
       DYNAMODB_TABLE_NAME: imageTable.tableName,
-      DLQ_URL: processImageDLQ.queueUrl,
+      DLQ_URL: logImageDLQ.queueUrl,
       
   },
   });
@@ -105,11 +112,11 @@ const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
 
 
 
-    const mailerFn = new lambdanode.NodejsFunction(this, "mailer-function", {
+    const confirmationMailerFn = new lambdanode.NodejsFunction(this, "confirmationMailerFn", {
     runtime: lambda.Runtime.NODEJS_16_X,
     memorySize: 1024,
     timeout: cdk.Duration.seconds(12),
-    entry: `${__dirname}/../lambdas/mailer.ts`,
+    entry: `${__dirname}/../lambdas/confirmationMailer.ts`,
   });
 
   //Subscribe Lambda to the SNS Topic with a Filter Policy
@@ -158,7 +165,7 @@ const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
         
       
       
-      newImageTopic.addSubscription(new subs.LambdaSubscription(mailerFn));
+      newImageTopic.addSubscription(new subs.LambdaSubscription(confirmationMailerFn));
 
 
       // Grant SES permissions to send emails
@@ -174,10 +181,10 @@ const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
           batchSize: 1,
           maxBatchingWindow: cdk.Duration.seconds(5),
       });
-      processImageFn.addEventSource(sqsEventSource);
+      logImageFn.addEventSource(sqsEventSource);
 
       // Update rejection lambda to use the DLQ
-      const dlqEventSource = new events.SqsEventSource(processImageDLQ, {
+      const dlqEventSource = new events.SqsEventSource(logImageDLQ, {
       batchSize: 5,
       maxBatchingWindow: cdk.Duration.seconds(5),
       });
@@ -185,20 +192,20 @@ const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
       
 
       // Grant Permissions
-      imagesBucket.grantReadWrite(processImageFn);
-      imageTable.grantWriteData(processImageFn); // Grant write permissions to the table
+      imagesBucket.grantReadWrite(logImageFn);
+      imageTable.grantWriteData(logImageFn); // Grant write permissions to the table
       
       // Grant Permissions for DLQ
       // Grant permissions for the main queue and DLQ
-        processImageDLQ.grantSendMessages(processImageFn);
-        processImageDLQ.grantConsumeMessages(rejectionMailerFn); // If rejection mailer processes DLQ
+        logImageDLQ.grantSendMessages(logImageFn);
+        logImageDLQ.grantConsumeMessages(rejectionMailerFn); // If rejection mailer processes DLQ
 
-      //processImageDLQ.grantSendMessages(processImageFn);
+      //logImageDLQ.grantSendMessages(logImageFn);
 
       
 
 
-      mailerFn.addToRolePolicy(
+      confirmationMailerFn.addToRolePolicy(
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: [
