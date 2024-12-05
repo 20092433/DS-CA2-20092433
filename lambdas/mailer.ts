@@ -22,34 +22,41 @@ const client = new SESClient({ region: SES_REGION});
 
 export const handler: SNSHandler = async (event: any) => {
   console.log("Event ", JSON.stringify(event));
+
   for (const record of event.Records) {
-    const snsMessage = JSON.parse(record.Sns.Message);
-    console.log('SNS Message:', snsMessage);
+    try {
+      console.log('Raw SNS Message:', record.Sns.Message);
+      const snsMessage = JSON.parse(record.Sns.Message);
+      console.log('Parsed SNS Message:', snsMessage);
 
+      if (snsMessage.Records) {
+        console.log("Record body ", JSON.stringify(snsMessage.Records));
+        for (const messageRecord of snsMessage.Records) {
+          const s3 = messageRecord.s3;
+          const srcBucket = s3.bucket.name;
+          const srcKey = decodeURIComponent(s3.object.key.replace(/\+/g, " "));
+          console.log('Source Bucket:', srcBucket);
+          console.log('Source Key:', srcKey);
 
-    if (snsMessage.Records) {
-      console.log("Record body ", JSON.stringify(snsMessage));
-      for (const messageRecord of snsMessage.Records) {
-        const s3e = messageRecord.s3;
-        const srcBucket = s3e.bucket.name;
-        // Object key may have spaces or unicode non-ASCII characters.
-        const srcKey = decodeURIComponent(s3e.object.key.replace(/\+/g, " "));
-        try {
-          const { name, email, message }: ContactDetails = {
-            name: "The Photo Album",
-            email: SES_EMAIL_FROM,
-            message: `We received your Image. Its URL is s3://${srcBucket}/${srcKey}`,
-          };
+          const name = "The Photo Album";
+          const email = process.env.SES_EMAIL_FROM!;
+          const message = `We received your Image. Its URL is s3://${srcBucket}/${srcKey}`;
+
           const params = sendEmailParams({ name, email, message });
-          await client.send(new SendEmailCommand(params));
-        } catch (error: unknown) {
-          console.log("ERROR is: ", error);
-          // return;
+          console.log('SES Email Params:', params);
+
+          const response = await client.send(new SendEmailCommand(params));
+          console.log('Email sent successfully:', response);
         }
+      } else {
+        console.warn('No Records found in SNS Message');
       }
+    } catch (error: unknown) {
+      console.error('Error processing SNS message or sending email:', JSON.stringify(error, null, 2));
     }
   }
 };
+
 
 function sendEmailParams({ name, email, message }: ContactDetails) {
   const parameters: SendEmailCommandInput = {
@@ -92,13 +99,3 @@ function getHtmlContent({ name, email, message }: ContactDetails) {
   `;
 }
 
- // For demo purposes - not used here.
-function getTextContent({ name, email, message }: ContactDetails) {
-  return `
-    Received an Email. 📬
-    Sent from:
-        👤 ${name}
-        ✉️ ${email}
-    ${message}
-  `;
-}

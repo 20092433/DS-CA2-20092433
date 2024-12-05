@@ -9,7 +9,10 @@ import {
 } from "@aws-sdk/client-s3";
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 const dynamoDb = new DynamoDBClient({ region: process.env.AWS_REGION });
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 
+
+const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
 
 
 const s3 = new S3Client();
@@ -33,14 +36,25 @@ export const handler: SQSHandler = async (event) => {
         const allowedExtensions = [".jpeg", ".png"];
         const fileExtension = srcKey.slice(srcKey.lastIndexOf(".")).toLowerCase();
 
+
+        
         if (!allowedExtensions.includes(fileExtension)) {
-          console.error(
-            `Invalid file type: ${fileExtension}. Supported types are ${allowedExtensions.join(
-              ", "
-            )}`
-          );
+          const rejectionMessage = {
+            reason: `Invalid file type: ${fileExtension}`,
+            file: srcKey,
+          };
+        
+          console.error(`Rejected file: ${srcKey}. Reason: Invalid file type ${fileExtension}`);
+        
+          // Send rejection message to the DLQ
+          await sqsClient.send(new SendMessageCommand({
+            QueueUrl: process.env.DLQ_URL, // Replace with your DLQ URL
+            MessageBody: JSON.stringify(rejectionMessage),
+          }));
+        
           throw new Error(`Unsupported file type: ${fileExtension}`);
         }
+        
 
         // Add coorect file type to DynamoDB
         try {
@@ -60,14 +74,7 @@ export const handler: SQSHandler = async (event) => {
         }
 
 
-
-
-
-
-
-
-
-        let origimage = null;
+         let origimage = null;
         try {
           // Download the image from the S3 source bucket.
           const params: GetObjectCommandInput = {

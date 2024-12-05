@@ -16,14 +16,19 @@ type RejectionDetails = {
 const client = new SESClient({ region: SES_REGION });
 
 export const handler: SQSHandler = async (event) => {
-  console.log('Rejection Messages Received: ', JSON.stringify(event));
+  console.log('Rejection Messages Received:', JSON.stringify(event));
 
   for (const record of event.Records) {
     try {
       const rejectionMessage: RejectionDetails = JSON.parse(record.body);
-
       const reason = rejectionMessage.reason || 'Unknown reason';
       const file = rejectionMessage.file || 'Unknown file';
+
+      // Process only "Invalid file type" messages
+      if (!reason.includes('Invalid file type')) {
+        console.log(`Skipping message for file: ${file}. Reason: ${reason}`);
+        continue;
+      }
 
       console.log(`Processing Rejection: Reason - ${reason}, File - ${file}`);
 
@@ -34,10 +39,12 @@ export const handler: SQSHandler = async (event) => {
         },
         Message: {
           Subject: {
+            Charset: 'UTF-8',
             Data: 'File Upload Rejected',
           },
           Body: {
             Text: {
+              Charset: 'UTF-8',
               Data: `The file "${file}" was rejected. Reason: ${reason}.`,
             },
           },
@@ -51,3 +58,4 @@ export const handler: SQSHandler = async (event) => {
     }
   }
 };
+

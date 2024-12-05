@@ -24,26 +24,21 @@ export class EDAAppStack extends cdk.Stack {
           autoDeleteObjects: true,
       });
 
-      // SQS Queues
-      const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
-          receiveMessageWaitTime: cdk.Duration.seconds(10),
-          deadLetterQueue: {
-              maxReceiveCount: 5,
-              queue: new sqs.Queue(this, 'img-created-dlq', {
-                  queueName: 'img-created-dlq',
-              }),
-          },
-      });
+      // Create the Dead Letter Queue
+const processImageDLQ = new sqs.Queue(this, 'process-image-dlq', {
+    retentionPeriod: cdk.Duration.days(14), // Retain messages for 14 days
+});
 
-      const rejectionQueue = new sqs.Queue(this, 'RejectionQueue', {
-          receiveMessageWaitTime: cdk.Duration.seconds(10),
-          deadLetterQueue: {
-              maxReceiveCount: 5,
-              queue: new sqs.Queue(this, 'RejectionDLQ', {
-                  queueName: 'rejection-dlq',
-              }),
-          },
-      });
+// Create the Main Queue and attach the Dead Letter Queue
+const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
+    receiveMessageWaitTime: cdk.Duration.seconds(19),
+    deadLetterQueue: {
+        queue: processImageDLQ, // Reference the Dead Letter Queue
+        maxReceiveCount: 5,    // Maximum number of retries before moving to DLQ
+    },
+});
+
+
 
       // SNS Topic
       const newImageTopic = new sns.Topic(this, 'NewImageTopic', {
@@ -56,9 +51,8 @@ export class EDAAppStack extends cdk.Stack {
           new s3n.SnsDestination(newImageTopic)
       );
 
-      // SQS Subscriptions to SNS Topic
-      newImageTopic.addSubscription(new subs.SqsSubscription(imageProcessQueue));
-      newImageTopic.addSubscription(new subs.SqsSubscription(rejectionQueue));
+      
+      
 
        // DynamoDB Table
       const imageTable = new dynamodb.Table(this, 'ImageTable', {
@@ -67,19 +61,38 @@ export class EDAAppStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY, // Optional: Deletes table when stack is deleted
       });
 
+
+      // Update Table Lambda
+      const updateTableFn = new lambdanode.NodejsFunction(this, "UpdateTableFn", {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: "handler",
+      entry: `${__dirname}/../lambdas/updateTable.ts`,
+      environment: {
+        DYNAMODB_TABLE_NAME: imageTable.tableName, // Pass table name as environment variable
+      },
+    });
+
+    //Grant DynamoDB permissions to the Lambda function
+    imageTable.grantWriteData(updateTableFn);
+
+
+
   // Update Lambda Function for Processing Images
       const processImageFn = new lambdanode.NodejsFunction(this, 'ProcessImageFn', {
       runtime: lambda.Runtime.NODEJS_18_X,
       entry: `${__dirname}/../lambdas/processImage.ts`,
-       handler: 'handler',
+      handler: 'handler',
       timeout: cdk.Duration.seconds(15),
       memorySize: 128,
       environment: {
       BUCKET_NAME: imagesBucket.bucketName,
-      DYNAMODB_TABLE_NAME: imageTable.tableName, 
-      REJECTION_QUEUE_URL: rejectionQueue.queueUrl,
+      DYNAMODB_TABLE_NAME: imageTable.tableName,
+      DLQ_URL: processImageDLQ.queueUrl,
+      
   },
-});
+  });
+
+    
 
       // Update Lambda Function for Rejections
      const rejectionMailerFn = new lambdanode.NodejsFunction(this, 'RejectionMailerFn', {
@@ -89,6 +102,64 @@ export class EDAAppStack extends cdk.Stack {
      timeout: cdk.Duration.seconds(10),
      memorySize: 128,
 });
+
+
+
+    const mailerFn = new lambdanode.NodejsFunction(this, "mailer-function", {
+    runtime: lambda.Runtime.NODEJS_16_X,
+    memorySize: 1024,
+    timeout: cdk.Duration.seconds(12),
+    entry: `${__dirname}/../lambdas/mailer.ts`,
+  });
+
+  //Subscribe Lambda to the SNS Topic with a Filter Policy
+  newImageTopic.addSubscription(
+    new subs.LambdaSubscription(updateTableFn, {
+      filterPolicy: {
+        metadata_type: sns.SubscriptionFilter.stringFilter({
+          allowlist: ["Caption", "Date", "Photographer"],
+        }),
+      },
+    })
+  );
+
+  
+      // SQS Subscriptions to SNS Topic
+      // newImageTopic.addSubscription(new subs.SqsSubscription(imageProcessQueue,
+      //    {
+      //   //   rawMessageDelivery: true,
+      //     //filterPolicyScope: "MessageBody", // Apply the filter to the message body
+      //     // filterPolicy: {
+      //     //   source: sns.SubscriptionFilter.stringFilter({
+      //     //     allowlist: ["Camera", "Phone"],
+      //     //   }),
+      //     //  }
+      //    }));
+
+
+         newImageTopic.addSubscription(
+          new subs.SqsSubscription(imageProcessQueue, {
+            filterPolicyWithMessageBody: {
+              Records: sns.FilterOrPolicy.policy({
+                s3: sns.FilterOrPolicy.policy({
+                  object: sns.FilterOrPolicy.policy({
+                    key: sns.FilterOrPolicy.filter(
+                      sns.SubscriptionFilter.stringFilter({
+                        matchPrefixes: ["image"], // Filter keys starting with "image"
+                      })
+                    ),
+                  }),
+                }),
+              }),
+            },
+            //rawMessageDelivery: true,
+          })
+        );
+        
+      
+      
+      newImageTopic.addSubscription(new subs.LambdaSubscription(mailerFn));
+
 
       // Grant SES permissions to send emails
     rejectionMailerFn.addToRolePolicy(new iam.PolicyStatement({
@@ -100,21 +171,43 @@ export class EDAAppStack extends cdk.Stack {
 
       // Add SQS Event Sources to Lambdas
       const sqsEventSource = new events.SqsEventSource(imageProcessQueue, {
-          batchSize: 5,
+          batchSize: 1,
           maxBatchingWindow: cdk.Duration.seconds(5),
       });
       processImageFn.addEventSource(sqsEventSource);
 
-      const rejectionEventSource = new events.SqsEventSource(rejectionQueue, {
-          batchSize: 5,
-          maxBatchingWindow: cdk.Duration.seconds(5),
+      // Update rejection lambda to use the DLQ
+      const dlqEventSource = new events.SqsEventSource(processImageDLQ, {
+      batchSize: 5,
+      maxBatchingWindow: cdk.Duration.seconds(5),
       });
-      rejectionMailerFn.addEventSource(rejectionEventSource);
+      rejectionMailerFn.addEventSource(dlqEventSource);
+      
 
       // Grant Permissions
       imagesBucket.grantReadWrite(processImageFn);
       imageTable.grantWriteData(processImageFn); // Grant write permissions to the table
-      rejectionQueue.grantSendMessages(processImageFn);
-      rejectionQueue.grantConsumeMessages(rejectionMailerFn);
+      
+      // Grant Permissions for DLQ
+      // Grant permissions for the main queue and DLQ
+        processImageDLQ.grantSendMessages(processImageFn);
+        processImageDLQ.grantConsumeMessages(rejectionMailerFn); // If rejection mailer processes DLQ
+
+      //processImageDLQ.grantSendMessages(processImageFn);
+
+      
+
+
+      mailerFn.addToRolePolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            "ses:SendEmail",
+            "ses:SendRawEmail",
+            "ses:SendTemplatedEmail",
+          ],
+          resources: ["*"],
+        })
+      );
   }
 }
