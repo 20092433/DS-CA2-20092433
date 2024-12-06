@@ -13,7 +13,7 @@ __YouTube Demo link__ - https://youtu.be/8mGiR2GELwE
 + Rejection Mailer -  Full Implemented.
 + Log Image -  Fully implemented. 
 
-### Phase 2 (if relevant).
+### Phase 2 
 
 
 
