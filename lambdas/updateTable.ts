@@ -7,24 +7,26 @@ const dynamoDb = new DynamoDBClient({ region: process.env.AWS_REGION });
 export const handler = async (event: SNSEvent) => {
     console.log("Received SNS Event:", JSON.stringify(event, null, 2));
 
+    // parse each record in the sns event
     for (const record of event.Records) {
+        //parse the sns message body
         const snsMessage = JSON.parse(record.Sns.Message);
 
-        // Extract values from SNS message
+        // Extract metadata type, file name, and metadata value from the SNS message
         const metadataType = record.Sns.MessageAttributes.metadata_type?.Value;
-        const fileName = snsMessage.id; // Match partition key that is 'fileName'
+        const fileName = snsMessage.id; // file name is partition key so match it 
         const metadataValue = snsMessage.value;
 
         // DynamoDB Update Parameters
         const params = {
             TableName: process.env.DYNAMODB_TABLE_NAME,
-            Key: { fileName: { S: fileName } }, // Use 'fileName' as key
+            Key: { fileName: { S: fileName } }, // 'file name will be used as key
             UpdateExpression: "SET #meta = :value",
             ExpressionAttributeNames: {
-                "#meta": metadataType, // Metadata type as attribute name
+                "#meta": metadataType, // Meta data type is attribute name
             },
             ExpressionAttributeValues: {
-                ":value": { S: metadataValue }, // Metadata value as attribute value
+                ":value": { S: metadataValue }, // meta data value as the value
             },
         };
 

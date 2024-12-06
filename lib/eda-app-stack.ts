@@ -121,7 +121,7 @@ const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
 
   //Subscribe Lambda to the SNS Topic with a Filter Policy
   newImageTopic.addSubscription(
-    new subs.LambdaSubscription(updateTableFn, {
+     new subs.LambdaSubscription(updateTableFn, {
       filterPolicy: {
         metadata_type: sns.SubscriptionFilter.stringFilter({
           allowlist: ["Caption", "Date", "Photographer"],
@@ -131,41 +131,55 @@ const imageProcessQueue = new sqs.Queue(this, 'img-created-queue', {
   );
 
   
-      // SQS Subscriptions to SNS Topic
-      // newImageTopic.addSubscription(new subs.SqsSubscription(imageProcessQueue,
+      // //SQS Subscriptions to SNS Topic
+       newImageTopic.addSubscription(new subs.SqsSubscription(imageProcessQueue));
       //    {
-      //   //   rawMessageDelivery: true,
-      //     //filterPolicyScope: "MessageBody", // Apply the filter to the message body
-      //     // filterPolicy: {
-      //     //   source: sns.SubscriptionFilter.stringFilter({
-      //     //     allowlist: ["Camera", "Phone"],
-      //     //   }),
-      //     //  }
+      //     rawMessageDelivery: true,
+      //     filterPolicyScope: "MessageBody", // Apply the filter to the message body
+      //     filterPolicy: {
+      //       source: sns.SubscriptionFilter.stringFilter({
+      //         allowlist: ["Camera", "Phone"],
+      //       }),
+      //      }
       //    }));
 
 
-         newImageTopic.addSubscription(
-          new subs.SqsSubscription(imageProcessQueue, {
-            filterPolicyWithMessageBody: {
-              Records: sns.FilterOrPolicy.policy({
-                s3: sns.FilterOrPolicy.policy({
-                  object: sns.FilterOrPolicy.policy({
-                    key: sns.FilterOrPolicy.filter(
-                      sns.SubscriptionFilter.stringFilter({
-                        matchPrefixes: ["image"], // Filter keys starting with "image"
-                      })
-                    ),
-                  }),
-                }),
-              }),
-            },
-            //rawMessageDelivery: true,
-          })
-        );
+      
+      
+      
+      
+   
+   
+      
+        
+        
         
       
       
-      newImageTopic.addSubscription(new subs.LambdaSubscription(confirmationMailerFn));
+      // newImageTopic.addSubscription(
+      //   new subs.LambdaSubscription(confirmationMailerFn, {
+      //     filterPolicy: {
+      //       eventType: sns.SubscriptionFilter.stringFilter({
+      //         allowlist: ["ObjectCreated:Put"], // Allow only image upload events
+      //       }),
+      //     },
+      //   })
+      // );
+
+      newImageTopic.addSubscription(
+        new subs.LambdaSubscription(confirmationMailerFn
+        //   filterPolicy: {
+        //     eventName: sns.SubscriptionFilter.stringFilter({
+        //       allowlist: ["s3:ObjectCreated:Put"], // Match only ObjectCreated:Put
+        //     }),
+        //   },
+        // })
+      ));
+      
+      
+      
+      
+      
 
 
       // Grant SES permissions to send emails

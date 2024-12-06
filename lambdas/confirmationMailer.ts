@@ -23,23 +23,31 @@ const client = new SESClient({ region: SES_REGION});
 export const handler: SNSHandler = async (event: any) => {
   console.log("Event ", JSON.stringify(event));
 
+  // iterate over each record in the SNS event message
   for (const record of event.Records) {
     try {
+      // parse the body of the SNS message
       console.log('Raw SNS Message:', record.Sns.Message);
       const snsMessage = JSON.parse(record.Sns.Message);
       console.log('Parsed SNS Message:', snsMessage);
 
+      // confirm there are records present in the message
       if (snsMessage.Records) {
         console.log("Record body ", JSON.stringify(snsMessage.Records));
+
+        // loop through each record message
         for (const messageRecord of snsMessage.Records) {
-          const s3 = messageRecord.s3;
-          const srcBucket = s3.bucket.name;
-          const srcKey = decodeURIComponent(s3.object.key.replace(/\+/g, " "));
+          const s3 = messageRecord.s3;  // extract event details
+          const srcBucket = s3.bucket.name; // get the name of the bucket
+          const srcKey = decodeURIComponent(s3.object.key.replace(/\+/g, " "));  // decode the object key
           console.log('Source Bucket:', srcBucket);
           console.log('Source Key:', srcKey);
 
-          const name = "The Photo Album";
-          const email = process.env.SES_EMAIL_FROM!;
+
+
+          // prepare email details
+          const name = "The Photo Album";   // the senders name
+          const email = process.env.SES_EMAIL_FROM!;  // email address of sender
           const message = `We received your Image. Its URL is s3://${srcBucket}/${srcKey}`;
 
           const params = sendEmailParams({ name, email, message });

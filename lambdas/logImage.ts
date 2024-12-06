@@ -19,25 +19,30 @@ const s3 = new S3Client();
 
 export const handler: SQSHandler = async (event) => {
   console.log("Event ", JSON.stringify(event));
+
+  //process each record in the SQS event
   for (const record of event.Records) {
+    //parse sqs message
     const recordBody = JSON.parse(record.body);        // Parse SQS message
-    const snsMessage = JSON.parse(recordBody.Message); // Parse SNS message
+    const snsMessage = JSON.parse(recordBody.Message); // parse SNS message within sqs 
 
     if (snsMessage.Records) {
       console.log("Record body ", JSON.stringify(snsMessage));
+
+      // loop through the S3 event records
       for (const messageRecord of snsMessage.Records) {
         const s3e = messageRecord.s3;
-        const srcBucket = s3e.bucket.name;
+        const srcBucket = s3e.bucket.name; //source bucket name
         // Object key may have spaces or unicode non-ASCII characters.
         const srcKey = decodeURIComponent(s3e.object.key.replace(/\+/g, " "));
 
 
-        // Validate file type
+        // validate the file type 
         const allowedExtensions = [".jpeg", ".png"];
         const fileExtension = srcKey.slice(srcKey.lastIndexOf(".")).toLowerCase();
 
 
-        
+        // reject file types that arent specified such as .txt
         if (!allowedExtensions.includes(fileExtension)) {
           const rejectionMessage = {
             reason: `Invalid file type: ${fileExtension}`,
@@ -56,7 +61,7 @@ export const handler: SQSHandler = async (event) => {
         }
         
 
-        // Add coorect file type to DynamoDB
+        // Add the files with the correct file type to the dynamodb table
         try {
           const tableName = process.env.DYNAMODB_TABLE_NAME; // E
           const putItemCommand = new PutItemCommand({
